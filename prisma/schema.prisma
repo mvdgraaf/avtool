@@ -1,0 +1,106 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  password  String
+  role      UserRole @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+/// Een productgroep, bijvoorbeeld "Pioneer DJM-900 Mixer" of "Shure SM58 Microfoon"
+model ProductGroup {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  brand       String?
+  category    String?   // bv. licht, geluid, truss, kabels
+  items       ProductItem[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+/// Een individueel fysiek product in een groep.
+/// Bv. één specifieke SM58 met serienummer en conditie.
+model ProductItem {
+  id            Int          @id @default(autoincrement())
+  serialNumber  String?      @unique
+  condition     String?      // bv. "goed", "reparatie nodig"
+  status        ItemStatus   @default(AVAILABLE)
+  groupId       Int
+  group         ProductGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  rentals       RentalItem[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+/// Enum voor status van een item
+enum ItemStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+  LOST
+}
+
+/// Een klant die huurt
+model Customer {
+  id        Int       @id @default(autoincrement())
+  name      String
+  password String
+  email     String?
+  phone     String?
+  rentals   Rental[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+/// Een verhuur contract / reservering
+model Rental {
+  id          Int          @id @default(autoincrement())
+  customerId  Int
+  customer    Customer     @relation(fields: [customerId], references: [id])
+  startDate   DateTime
+  endDate     DateTime
+  items       RentalItem[]
+  status      RentalStatus @default(PENDING)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+/// Enum voor status van een verhuur
+enum RentalStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+/// Koppelt verhuur aan de specifieke items
+model RentalItem {
+  id         Int         @id @default(autoincrement())
+  rentalId   Int
+  rental     Rental      @relation(fields: [rentalId], references: [id])
+  itemId     Int
+  item       ProductItem @relation(fields: [itemId], references: [id])
+}
