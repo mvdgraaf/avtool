@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient } = require('../generated/prisma');
 
 const prisma = new PrismaClient();
 const router = express.Router();
@@ -122,14 +122,39 @@ router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body || {};
         if (!email || !password) {
-            return res.status(400).json({ error: 'Email and password are required.' });
+            if (wantsJSON(req)) {
+                return res.status(400).json({error: 'Email and password are required.'});
+            }
+            return res.status(400).render('auth/register', {
+                title: 'Register',
+                error: 'Email and password are required.',
+                values: {email: 'email' || ''},
+            })
         }
 
         const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-
+        if (!user) {
+            if (wantsJSON(req)) {
+                return res.status(401).json({error: 'Invalid credentials'});
+            } else {
+                return res.status(401).render('auth/register', {
+                    title: 'Register',
+                    error: 'Invalid credentials',
+                    values: {email: 'email'},
+                })
+            }
+        }
         const ok = await bcrypt.compare(password, user.password);
-        if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+        if (!ok) {
+            if (wantsJSON(req)) {
+                return res.status(401).json({error: 'Invalid credentials'});
+            }
+            return res.status(401).render('auth/register', {
+                title: 'Register',
+                error: 'Invalid credentials',
+                values: {email: 'email'},
+            })
+        }
 
         const token = signJwt({ sub: user.id, email: user.email }, process.env.JWT_SECRET);
         setAuthCookie(res, token);
@@ -139,7 +164,15 @@ router.post('/login', async (req, res) => {
             token,
         });
     } catch (err) {
-        return res.status(500).json({ error: 'Internal server error' });
+        if (wantsJSON(req)) {
+            return res.status(500).json({ error: 'Internal server error' });
+        } else {
+            return res.status(500).render('auth/register', {
+                title: 'Register',
+                error: 'Internal server error',
+                values: {email: 'email' || ''},
+            });
+        }
     }
 });
 
