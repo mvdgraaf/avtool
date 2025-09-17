@@ -2,12 +2,15 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('../generated/prisma');
+const wantsJSON = require('../middleware/wantsJSON');
+const validateRedirect = require('../middleware/validateRedirect');
 
 const prisma = new PrismaClient();
 const router = express.Router();
 
 const JWT_COOKIE_NAME = 'token';
 const JWT_TTL = '7d';
+const AUTH_LAYOUT = 'layouts/auth';
 
 function signJwt(payload, secret) {
     return jwt.sign(payload, secret, { expiresIn: JWT_TTL });
@@ -22,35 +25,27 @@ function setAuthCookie(res, token) {
     });
 }
 
-function wantsJSON(req) {
-    if (req.query.response === 'json' || req.body?.response === 'json') return true;
-    if (req.get('X-API-Request') === 'true') return true;
-
-    const accept = req.get('Accept') || '';
-    return accept.includes('application/json') && !accept.includes('text/html');
+// Uniforme helper voor JSON of server-rendered views (voor auth-views altijd AUTH_LAYOUT)
+function sendViewOrJson(req, res, status, view, model, jsonBody) {
+    if (wantsJSON(req)) {
+        return res.status(status).json(jsonBody ?? { error: model?.error || 'Error' });
+    }
+    return res.status(status).render(view, { layout: AUTH_LAYOUT, ...model });
 }
 
-function validateRedirect(req,redirectParam) {
-    if (!redirectParam) return null;
-
-    if (redirectParam.startsWith('/')) {
-        return redirectParam;
-    }
-    try {
-        const url = new URL(redirectParam);
-        if (!['http:', 'https:'].includes(url.protocol)) {return redirectParam;}
-
-        const allowedHosts = (process.env.ALLOWED_REDIRECT_HOSTS || '').split(',').map(h => h.trim()).filter(Boolean);
-        if (allowedHosts.length === 0) {return null;}
-        if (allowedHosts.includes(url.hostname)) {return url.toString();}
-        return null;
-    } catch (_e) {
-        return null;
-    }
+// Helper om token uit te geven en cookie te zetten
+function issueSession(res, user) {
+    const token = signJwt({ sub: user.id, email: user.email }, process.env.JWT_SECRET);
+    setAuthCookie(res, token);
+    return token;
 }
 
 router.get('/register', async (req, res) => {
-    res.render('auth/register',  { title: 'Registreren', error: null, values: { email: '' } })
+    res.render('auth/register',  {
+        title: 'Registreren',
+        layout: 'layouts/auth',
+        error: null,
+        values: { email: '' } })
 })
 
 router.post('/register', async (req, res) => {
@@ -62,6 +57,7 @@ router.post('/register', async (req, res) => {
             }
             return res.status(400).render('auth/register', {
                 title: 'Register',
+                layout: 'layouts/auth',
                 error: 'Email and password are required.',
                 values: {email: 'email' || ''},
             })
@@ -74,6 +70,7 @@ router.post('/register', async (req, res) => {
             }
             return res.status(409).render('auth/register', {
                 title: 'Register',
+                layout: 'layouts/auth',
                 error: 'Email already in use.',
                 values: {email: 'email'},
 
@@ -88,11 +85,10 @@ router.post('/register', async (req, res) => {
             select: {id: true, email: true},
         });
 
-        const token = signJwt({sub: user.id, email: user.email}, process.env.JWT_SECRET);
-        setAuthCookie(res, token);
+        const token = issueSession(res, user);
 
         if (wantsJSON(req)) {
-            return res.status(201).json({user, token});
+            return res.status(201).json({ user, token });
         }
 
         const safeRedirect = validateRedirect(req, req.body.redirect);
@@ -104,6 +100,7 @@ router.post('/register', async (req, res) => {
         }
         return res.status(500).render('auth/register', {
             title: 'Register',
+            layout: 'layouts/auth',
             error: 'Internal server error',
             values: {email: 'email' || ''},
         });
@@ -115,21 +112,25 @@ router.get('/login', (req, res) => {
     const success = req.query.success === 'true';
     const message = req.query.message || '';
 
-    res.render('auth/login', { title: 'Login', error: null, success: success, message: message, values: { email: '' } })
+    res.render('auth/login', {
+        title: 'Login',
+        layout: 'layouts/auth',
+        error: null,
+        success: success,
+        message: message,
+        values: { email: '' }
+    })
 })
 
 router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body || {};
         if (!email || !password) {
-            if (wantsJSON(req)) {
-                return res.status(400).json({error: 'Email and password are required.'});
-            }
-            return res.status(400).render('auth/register', {
-                title: 'Register',
-                error: 'Email and password are required.',
-                values: {email: 'email' || ''},
-            })
+                return sendViewOrJson(req, res, 400, 'auth/register', {
+                    title: 'Register',
+                    error: 'Email and password are required.',
+                    values: { email: email || '' },
+                }, { error: 'Email and password are required.' });
         }
 
         const user = await prisma.user.findUnique({ where: { email } });
@@ -139,6 +140,7 @@ router.post('/login', async (req, res) => {
             } else {
                 return res.status(401).render('auth/register', {
                     title: 'Register',
+                    layout: 'layouts/auth',
                     error: 'Invalid credentials',
                     values: {email: 'email'},
                 })
@@ -151,13 +153,13 @@ router.post('/login', async (req, res) => {
             }
             return res.status(401).render('auth/register', {
                 title: 'Register',
+                layout: 'layouts/auth',
                 error: 'Invalid credentials',
                 values: {email: 'email'},
             })
         }
 
-        const token = signJwt({ sub: user.id, email: user.email }, process.env.JWT_SECRET);
-        setAuthCookie(res, token);
+        const token = issueSession(res, user);
 
         return res.json({
             user: { id: user.id, email: user.email },
@@ -169,6 +171,7 @@ router.post('/login', async (req, res) => {
         } else {
             return res.status(500).render('auth/register', {
                 title: 'Register',
+                layout: 'layouts/auth',
                 error: 'Internal server error',
                 values: {email: 'email' || ''},
             });
