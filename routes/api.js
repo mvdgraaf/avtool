@@ -151,5 +151,9 @@ router.get('/rentals/:id/items/:itemId', async (req, res, next) => {
     }
 });
 
+router.post('/alert', async (req, res, next) => {
+
+})
+
 
 module.exports = router;
