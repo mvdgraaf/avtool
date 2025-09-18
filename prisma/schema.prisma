@@ -22,6 +22,8 @@ model User {
   role      UserRole @default(USER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  Alert Alert[]
 }
 
 enum UserRole {
@@ -103,4 +105,30 @@ model RentalItem {
   rental     Rental      @relation(fields: [rentalId], references: [id])
   itemId     Int
   item       ProductItem @relation(fields: [itemId], references: [id])
+}
+
+enum AlertType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+}
+
+model Alert {
+  id        Int        @id @default(autoincrement())
+  userId    Int
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type      AlertType  @default(INFO)
+  title     String?
+  message   String
+  linkUrl   String?
+  metadata  Json?
+
+  isRead    Boolean    @default(false)
+  readAt    DateTime?
+  expiresAt DateTime?
+  createdAt DateTime   @default(now())
+
+  @@index([userId, isRead, createdAt])
 }

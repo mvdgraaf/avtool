@@ -1,11 +1,11 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('../generated/prisma');
-const wantsJSON = require('../middleware/wantsJSON');
-const validateRedirect = require('../middleware/validateRedirect');
+const wantsJSON = require('../utils/wantsJSON');
+const validateRedirect = require('../utils/validateRedirect');
+const prisma = require('../utils/prisma');
+const isLoggedIn = require('../utils/isLoggedIn');
 
-const prisma = new PrismaClient();
 const router = express.Router();
 
 const JWT_COOKIE_NAME = 'token';
@@ -62,8 +62,21 @@ router.post('/register', async (req, res) => {
                 values: {email: 'email' || ''},
             })
         }
-
-        const existing = await prisma.user.findUnique({where: {email}});
+        let existing;
+        try{
+            existing = await prisma.user.findUnique({where: {email}});
+        } catch (err) {
+            console.error(err);
+            if (wantsJSON(req)) {
+                return res.status(409).json({error: 'Error while registering.'});
+            }
+            return res.status(409).render('auth/register', {
+                title: 'Register',
+                layout: 'layouts/auth',
+                error: 'Error while registering.',
+                values: {email: 'email'},
+            });
+        }
         if (existing) {
             if (wantsJSON(req)) {
                 return res.status(409).json({error: 'Email already  in use.'});
@@ -71,7 +84,7 @@ router.post('/register', async (req, res) => {
             return res.status(409).render('auth/register', {
                 title: 'Register',
                 layout: 'layouts/auth',
-                error: 'Email already in use.',
+                error: 'Email already  in use.',
                 values: {email: 'email'},
 
             });
@@ -92,23 +105,29 @@ router.post('/register', async (req, res) => {
         }
 
         const safeRedirect = validateRedirect(req, req.body.redirect);
-        return res.redirect(safeRedirect || '/login?success=true&message=Account%20created%20successfully!');
+        return res.redirect(safeRedirect || '/auth/login?success=true&message=Account%20created%20successfully!');
 
     } catch (err) {
+        console.error(err);
         if (wantsJSON(req)) {
             return res.status(500).json({error: 'Internal server error'});
         }
         return res.status(500).render('auth/register', {
             title: 'Register',
             layout: 'layouts/auth',
-            error: 'Internal server error',
-            values: {email: 'email' || ''},
+            error: 'Error while registering.',
+            values: {email: '' || ''},
         });
     }
 });
 
 
 router.get('/login', (req, res) => {
+    // Als al ingelogd (geldige token), redirect naar home
+    if (isLoggedIn(req)) {
+        return res.redirect('/');
+    }
+
     const success = req.query.success === 'true';
     const message = req.query.message || '';
 
@@ -126,9 +145,10 @@ router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body || {};
         if (!email || !password) {
-                return sendViewOrJson(req, res, 400, 'auth/register', {
-                    title: 'Register',
+                return sendViewOrJson(req, res, 400, 'auth/login', {
+                    title: 'login',
                     error: 'Email and password are required.',
+                    message: '',
                     values: { email: email || '' },
                 }, { error: 'Email and password are required.' });
         }
@@ -138,10 +158,11 @@ router.post('/login', async (req, res) => {
             if (wantsJSON(req)) {
                 return res.status(401).json({error: 'Invalid credentials'});
             } else {
-                return res.status(401).render('auth/register', {
-                    title: 'Register',
+                return res.status(401).render('auth/login', {
+                    title: 'login',
                     layout: 'layouts/auth',
                     error: 'Invalid credentials',
+                    message: '',
                     values: {email: 'email'},
                 })
             }
@@ -151,33 +172,48 @@ router.post('/login', async (req, res) => {
             if (wantsJSON(req)) {
                 return res.status(401).json({error: 'Invalid credentials'});
             }
-            return res.status(401).render('auth/register', {
-                title: 'Register',
+            return res.status(401).render('auth/login', {
+                title: 'login',
                 layout: 'layouts/auth',
                 error: 'Invalid credentials',
+                message: '',
                 values: {email: 'email'},
             })
         }
 
         const token = issueSession(res, user);
 
-        return res.json({
-            user: { id: user.id, email: user.email },
-            token,
-        });
+        if (wantsJSON(req)) {
+            return res.json({
+                user: { id: user.id, email: user.email },
+                token,
+            });
+        } else {
+            return res.redirect('/');
+        }
+
     } catch (err) {
         if (wantsJSON(req)) {
             return res.status(500).json({ error: 'Internal server error' });
         } else {
-            return res.status(500).render('auth/register', {
-                title: 'Register',
+            return res.status(500).render('auth/login', {
+                title: 'login',
                 layout: 'layouts/auth',
                 error: 'Internal server error',
+                message: '',
                 values: {email: 'email' || ''},
             });
         }
     }
 });
+router.get('/logout', (req, res) => {
+    res.clearCookie(JWT_COOKIE_NAME, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+    });
+    return res.redirect('/auth/login');
+})
 
 router.post('/logout', (req, res) => {
     res.clearCookie(JWT_COOKIE_NAME, {

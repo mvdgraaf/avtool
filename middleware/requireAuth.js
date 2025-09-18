@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const wantsJSON = require('./wantsJSON');
+const wantsJSON = require('../utils/wantsJSON');
 
 module.exports = function requireAuth(req, res, next) {
     try {
@@ -23,7 +23,10 @@ module.exports = function requireAuth(req, res, next) {
         } else {
             return res.status(401).render('auth/login', {
                 title: 'Login',
+                layout: 'layouts/auth',
                 error: 'Invalid or expired token.',
+                message: '',
+                success: false,
                 values: { email: '' },
             });
         }
