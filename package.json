@@ -10,7 +10,7 @@
     "db:seed": "npx prisma db seed"
   },
   "dependencies": {
-    "@prisma/client": "^6.16.2",
+    "@prisma/client": "^7.1.0",
     "@prisma/extension-accelerate": "^2.0.2",
     "bcrypt": "^6.0.0",
     "body-parser": "^2.2.0",
